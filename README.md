@@ -1,6 +1,6 @@
 # Automated Cryptocurrency Trading — Project Overview
 
-This repository contains two independent research directions, each in its own folder. Both tackle automated BTC/crypto trading using deep learning but take fundamentally different approaches.
+Two independent research directions, each in its own folder. Both tackle automated BTC/crypto trading using deep learning but take fundamentally different approaches.
 
 ---
 
@@ -24,16 +24,21 @@ This repository contains two independent research directions, each in its own fo
 
 **Approach:** Reinforcement Learning (Double Dueling DQN + Prioritized Experience Replay)  
 **Framework:** PyTorch + Tianshou  
-**Assets:** ADA, BTC, ETH, LTC — 1-hour bars  
-**Data:** 4 HDF5 files (upload required)
+**Assets:** ADA, BTC, ETH, LTC — 1-hour bars (resampled from minute HDF5 files)  
+**Data:** 4 HDF5 files (upload required), 80/20 chronological train/test split  
+**Original design:** Nick Kaparinos (2022)
 
-The agent learns to manage a portfolio of 4 cryptocurrencies: at each timestep it decides which asset to hold (or go to cash). The three notebooks are identical except for how raw prices are normalized before being fed to the LSTM encoder network. The goal is to compare which normalization strategy leads to better training stability and final performance.
+The agent manages a portfolio of 4 cryptocurrencies: at each timestep it chooses which single asset to hold (or go to cash). A **Dueling DQN** with an **LSTM encoder** (128 hidden units, one per asset) learns from a **Prioritized Experience Replay** buffer (500k transitions, α=0.7, β=0.5). Episodes are 1000 steps drawn randomly from training data; starting balance is $1,000 with a 0.1% trading fee.
+
+The three notebooks are identical except for how raw prices are normalized before being fed to the LSTM — the goal is to compare which strategy leads to better training stability:
 
 | Notebook | Normalization | How it works |
 |---|---|---|
-| `colab_option1_episode_norm.ipynb` | Episode-Start Price | OHLC divided by the open price at episode start — values stay near 1.0, scale-invariant |
-| `colab_option2_log_returns.ipynb` | Log Returns | `log(P_t / P_{t-1})` replaces absolute prices — stationary signal, standard in quant finance |
-| `colab_option3_rolling_zscore.ipynb` | Rolling Z-Score | Z-scored over the 24-bar observation window — adapts to local price regime dynamically |
+| `colab_option1_episode_norm.ipynb` | Episode-Start Price | OHLC ÷ open at episode start — values near 1.0, scale-invariant |
+| `colab_option2_log_returns.ipynb` | Log Returns | `log(P_t / P_{t−1})` — stationary signal, standard in quant finance |
+| `colab_option3_rolling_zscore.ipynb` | Rolling Z-Score | Z-scored over the 24-bar window — adapts to local price regime |
+
+Training: Adam `lr=1e-4`, 15 epochs × 150k steps, batch 128, ε-greedy from 0.6 → 0.0 over ~6 epochs. Tracked via W&B.
 
 ---
 
@@ -42,9 +47,11 @@ The agent learns to manage a portfolio of 4 cryptocurrencies: at each timestep i
 **Approach:** Supervised Learning (Binary Classification)  
 **Framework:** TensorFlow / Keras  
 **Asset:** BTC/USDT — 1-minute bars  
-**Data:** Fetched automatically from Binance (no files needed)
+**Data:** Auto-fetched from Binance public S3 (no API key), 51,773 candles ≈ 35 days, 85/15 chronological split
 
-CAT trains a **Transformer Encoder** (~33M parameters) to predict whether the next 1-minute BTC candle will close **UP or DOWN**. It uses 10 features per candle including OHLCV, Order Book Imbalance (proxy), RSI, EMA diff, volume ratio, and price acceleration. The output is a probability that drives a LONG / SHORT / HOLD signal with a configurable confidence threshold.
+CAT trains a **Transformer Encoder** (~33M parameters, 6 blocks, 8 heads, d_model=512) to predict whether the next 1-minute BTC candle closes **UP or DOWN**. It uses 10 features per candle: OHLCV, Order Book Imbalance proxy, RSI-14, EMA diff, volume ratio, and price acceleration. The output is a `P(UP)` sigmoid probability that drives LONG / SHORT / HOLD signals using a configurable confidence threshold (default: signal only when `|prob − 0.5| > 0.15`).
+
+Training: AdamW `lr=1e-4`, `weight_decay=1e-4`, `binary_crossentropy` loss, 80 max epochs with early stopping (patience=6) and `ReduceLROnPlateau`.
 
 ---
 
@@ -56,13 +63,16 @@ CAT trains a **Transformer Encoder** (~33M parameters) to predict whether the ne
 | **Task** | Portfolio management | Price direction classification |
 | **Assets** | 4 cryptos (ADA, BTC, ETH, LTC) | BTC/USDT only |
 | **Timeframe** | 1-hour bars | 1-minute bars |
-| **Model** | Double Dueling DQN + LSTM | Transformer Encoder (BERT-style) |
-| **Output** | Action: which asset to hold | P(UP) → LONG / SHORT / HOLD signal |
+| **Model** | Double Dueling DQN + LSTM encoder | Transformer Encoder (BERT-style, ~33M params) |
+| **Output** | Action: which asset to hold | P(UP) → LONG / SHORT / HOLD |
+| **Loss / reward** | Portfolio value change (reward) | binary_crossentropy |
 | **Data source** | HDF5 files (upload required) | Auto-fetched from Binance S3 |
+| **Train/Test split** | 80% / 20% chronological | 85% / 15% chronological |
+| **Experiment tracking** | Weights & Biases (W&B) | Local files + eval_report.txt |
+| **Framework** | PyTorch + Tianshou | TensorFlow / Keras |
 
 ---
 
 ## Getting Started
 
-Each folder has its own `README.md` with detailed setup instructions, architecture descriptions, and dependency lists. Both notebooks are designed to run on **Google Colab** or **Kaggle** with a GPU runtime — all dependencies are installed automatically by the first cell.
-# BTC-TEST-TEAM
+Each folder has its own `README.md` with full details on data, features, architecture, and all training hyperparameters. Both notebooks are designed for **Google Colab** or **Kaggle** with a GPU runtime — all dependencies are installed automatically by the first cell.
